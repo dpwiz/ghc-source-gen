@@ -49,12 +49,17 @@ module GHC.SourceGen.Decl
     , patSynSigs
     , patSynSig
     , patSynBind
+      -- * FFI
+    , foreignImport
+    , capiFunction
+    , capiValue
     ) where
 
+import Data.String (fromString)
 #if MIN_VERSION_ghc(9,0,0)
 import GHC (LexicalFixity(Prefix))
 import GHC.Data.Bag (listToBag)
-import GHC.Types.SrcLoc (LayoutInfo(..))
+import GHC.Types.SrcLoc (LayoutInfo(..), noLoc)
 #else
 import BasicTypes (LexicalFixity(Prefix))
 import Bag (listToBag)
@@ -108,6 +113,9 @@ import GHC.SourceGen.Name
 import GHC.SourceGen.Name.Internal
 import GHC.SourceGen.Syntax.Internal
 import GHC.SourceGen.Type.Internal
+import GHC.Types.ForeignCall (CCallConv(..), CCallTarget (..), Header (..), CLabelString, Safety (..))
+import GHC.Types.SourceText (SourceText(..))
+import GHC.Data.FastString (FastString)
 
 -- | A definition that can appear in the body of a @class@ declaration.
 --
@@ -603,3 +611,33 @@ patSynBind n ns p = bindB $ noExt PatSynBind
     prefixCon' = PrefixCon
 #endif
 
+foreignImport :: ForeignImport -> OccNameStr -> HsType' -> HsDecl'
+foreignImport fi name ty = noExt ForD $ ForeignImport
+    { fd_i_ext = ext
+    , fd_name = typeRdrName $ unqual name
+    , fd_sig_ty = sigType ty
+    , fd_fi = fi
+    }
+  where
+#if MIN_VERSION_ghc(9,2,0)
+    ext = EpAnnNotUsed
+#elif MIN_VERSION_ghc(8,10,0)
+    ext = NoExtField
+#elif MIN_VERSION_ghc(8,6,0)
+    ext = NoExt
+#endif
+
+capiFunction :: FastString -> String -> ForeignImport
+capiFunction = capi True
+
+capiValue :: FastString -> String -> ForeignImport
+capiValue = capi False
+
+capi :: Bool -> FastString -> String -> ForeignImport
+capi isFunction header label =
+    CImport
+        (noLoc CApiConv)
+        (noLoc PlaySafe)
+        (Just $ Header NoSourceText header)
+        (CFunction $ StaticTarget (SourceText label) (fromString label) Nothing isFunction)
+        (noLoc NoSourceText)
